@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    
+    <!-- iOS & PWA Setup -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- ✅ CHANGE 1: Icon type 'image/png' aur extension .png karein -->
+    <link rel="icon" type="image/png" href="/icons/icon-192x192.png" />
+    
+    <!-- ✅ CHANGE 2: Apple icon bhi .png karein -->
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    
+    <link rel="manifest" href="/manifest.json" />
+    <title>TailorBook</title>
+
+    <!-- Pre-load CSS for Splash Screen -->
+    <style>
+      body { margin: 0; padding: 0; background-color: #ffffff; }
+      
+      /* Splash Screen Styles */
+      .app-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        width: 100vw;
+        font-family: system-ui, -apple-system, sans-serif;
+        background-color: #ffffff;
+        color: #333;
+        position: fixed; /* Ensure it stays on top */
+        top: 0;
+        left: 0;
+        z-index: 9999;
+      }
+
+      .app-logo {
+        width: 120px;
+        height: 120px;
+        margin-bottom: 20px;
+        /* Agar PNG transparent nahi hai to thoda rounded corners de sakte hain */
+        border-radius: 20px; 
+        animation: pulse 2s infinite;
+      }
+
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #000000; /* Theme Color */
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 20px;
+      }
+
+      .app-version {
+        font-size: 14px;
+        color: #888;
+        position: absolute;
+        bottom: 30px;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      @keyframes pulse {
+        0% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.9; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-hDtVyH6P.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-We7mGOUC.css">
+  </head>
+  <body>
+    <div id="root">
+      <!-- Initial Loading Screen (Jab tak React load nahi hota ye dikhega) -->
+      <div class="app-loading">
+        
+        <!-- ✅ CHANGE 3: Yahan apni PNG file ka naam likhein -->
+        <img src="/icons/icon-192x192.png" alt="TailorBook Logo" class="app-logo" />
+        
+        <div class="spinner"></div>
+        
+        <div class="app-version">v1.0.0</div>
+      </div>
+    </div>
+  </body>
+</html>
