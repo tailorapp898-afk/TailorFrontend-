@@ -162,50 +162,48 @@ export const loadSampleData = async (userId) => {
   }
 };
 
-/**
- * Attempt to synchronize all locally unsynced records to a backend.
- * This function is intentionally generic: it collects unsynced records from all
- * known stores and, if a syncFn is provided and the client is online, calls it
- * with the unsynced payload. The syncFn should perform network requests and
- * return an object indicating which records were successfully synced.
- *
- * If syncFn is not provided or client is offline, this returns the collected
- * unsynced records so the caller can decide what to do.
- *
- * Example syncFn signature:
- *   async function syncFn(unsynced) { return { success: true, syncedIds: { orders: ['local-123'] } } }
- */
+
+
+
 export const syncAllToBackend = async (syncFn) => {
   const db = await dbPromise;
   const storeNames = ['customers','families','orders','payments','invoices','measurements','templates'];
-  const unsynced = {};
+  
+  // Variable ka naam 'payload' kar diya kyunki ab isme SARA data hoga, sirf unsynced nahi
+  const payload = {}; 
 
-  // 1️⃣ Collect unsynced records
+  // 1️⃣ Collect ALL records (Not just unsynced)
   for (const storeName of storeNames) {
     try {
       const all = await db.getAll(storeName);
-      unsynced[storeName] = (all || []).filter(item => item && item.synced !== true);
+      // 👇 CHANGE: Filter hata diya, ab sara data jayega
+      payload[storeName] = all || []; 
     } catch (err) {
-      unsynced[storeName] = [];
+      payload[storeName] = [];
     }
   }
 
-  // 2️⃣ If no sync function or offline, just return unsynced
+  // 2️⃣ Check connectivity
   if (!syncFn || typeof syncFn !== 'function' || !navigator.onLine) {
-    return { success: false, reason: !navigator.onLine ? 'offline' : 'no-sync-fn', unsynced };
+    return { success: false, reason: !navigator.onLine ? 'offline' : 'no-sync-fn', unsynced: payload };
   }
 
-  // 3️⃣ Call sync function
-  const result = await syncFn(unsynced);
+  // 3️⃣ Call sync function with ALL data
+  const result = await syncFn(payload);
 
   if (result && result.success) {
-    // ✅ Mark all sent records as synced locally
+    // ✅ Mark ALL records as synced locally
     for (const storeName of storeNames) {
       const tx = db.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
-      const records = unsynced[storeName];
+      const records = payload[storeName];
+      
       for (const rec of records) {
+        // Agar pehle se synced marked hai to bar bar write karne ki zaroorat nahi (performance bachane ke liye)
+        if (rec.synced === true) continue; 
+
         try {
+          // Sirf unko update karo jo synced nahi thay
           store.put({ ...rec, synced: true, updatedAt: new Date() });
         } catch (err) {
           console.error('Failed marking synced for', storeName, rec._id || rec.localId, err);
