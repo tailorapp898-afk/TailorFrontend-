@@ -57,13 +57,33 @@ export default function SettingsPage() {
   };
 
   // --- Sync Data ---
+// --- Sync Data Function ---
   const handleSync = async () => {
     setLoadingSync(true);
+
+    // Yeh function `syncAllToBackend` ko pass hoga
     const syncFn = async (unsyncedData) => {
+      
+      // 👇 STEP 1: Check karein ke Users ke ilawa koi data hai?
+      const hasBusinessData = Object.entries(unsyncedData).some(([key, arr]) => {
+        if (key === 'users') return false; // Users ko count na karein
+        return Array.isArray(arr) && arr.length > 0; // Baqi arrays check karein
+      });
+
+      // 👇 STEP 2: Agar Business Data nahi hai to ruk jayen
+      if (!hasBusinessData) {
+        console.log("⚠️ Only User data found. Skipping server sync to keep local DB dirty.");
+        
+        // IMPORTANT: Success FALSE return karein taake 
+        // `syncAllToBackend` items ko local DB se delete/update na kare.
+        return { success: false, reason: "skipped" }; 
+      }
+
+      // 👇 STEP 3: API Call (Sab kuch bhejein, Users samait)
       try {
         const response = await axios.post(
           `${API_URL}/sync/syncAllToMongo`,
-          unsyncedData,
+          unsyncedData, // Pura packet jayega
           { headers: { Authorization: `Bearer ${token}` } }
         );
         return { success: true, syncedIds: response.data.syncedIds };
@@ -73,9 +93,13 @@ export default function SettingsPage() {
       }
     };
 
+    // --- Execution ---
     try {
+      // Wrapper function call
       const result = await syncAllToBackend(syncFn);
+
       if (result.success) {
+        // ✅ Case 1: Data Successfully Server par gaya
         const now = new Date().toLocaleString();
         localStorage.setItem("lastSync", now);
         setLastSync(now);
@@ -83,16 +107,31 @@ export default function SettingsPage() {
           title: "Success",
           description: "Data synced to cloud successfully.",
         });
+
+      } else if (result.reason === "skipped") {
+        // ⚠️ Case 2: Data tha lekin sirf Users ka tha, isliye humne roka
+        console.log("Sync skipped. Waiting for business data.");
+        toast({
+            title: "Up to Date",
+            description: "No new business data (Orders/Customers) to sync.",
+            variant: "default", 
+        });
+
       } else if (result.reason === "offline") {
+        // ❌ Case 3: Internet nahi hai
         toast({
           title: "Offline",
           description: "You are offline. Sync will be attempted later.",
           variant: "destructive",
         });
+
       } else {
+        // ❌ Case 4: Koi aur error (API fail etc)
         throw new Error("Sync failed");
       }
-    } catch {
+
+    } catch (error) {
+      console.error(error);
       toast({
         title: "Error",
         description: "Failed to sync data.",
@@ -102,140 +141,155 @@ export default function SettingsPage() {
       setLoadingSync(false);
     }
   };
+  const handleLoad = async () => {
+    setLoadingLoad(true);
+    let dataLoadedFromServer = false;
 
-const handleLoad = async () => {
-  setLoadingLoad(true);
-  let dataLoadedFromServer = false;
+    try {
+      const response = await axios.get(`${API_URL}/sync/loadAllFromMongo`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-  try {
-    const response = await axios.get(`${API_URL}/sync/loadAllFromMongo`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+      const serverData = response.data?.data;
+      console.log(response);
 
-    const serverData = response.data?.data;
-    console.log(response);    
-    
+      if (serverData && typeof serverData === "object") {
+        // Normalize structure (ensure arrays always exist)
+        const normalizedData = {
+          users: serverData.users || [],
+          customers: serverData.customers || [],
+          families: serverData.families || serverData.familys || [],
+          orders: serverData.orders || [],
+          invoices: serverData.invoices || [],
+          payments: serverData.payments || [],
+          measurements: serverData.measurements || [],
+          templates: serverData.templates || [],
+        };
 
-    if (serverData && typeof serverData === "object") {
-      // Normalize structure (ensure arrays always exist)
-      const normalizedData = {
-        users: serverData.users || [],
-        customers: serverData.customers || [],
-        families: serverData.families || serverData.familys || [], // <-- fix here
-        orders: serverData.orders || [],
-        invoices: serverData.invoices || [],
-        payments: serverData.payments || [],
-        measurements: serverData.measurements || [],
-        templates: serverData.templates || [],
-      };
+        // 🔴 CHANGE HERE:
+        // Sirf Business Data ka count check karein (Users ko count mein shamil na karein)
+        const businessDataCount =
+          (normalizedData.customers.length || 0) +
+          (normalizedData.families.length || 0) +
+          (normalizedData.orders.length || 0) +
+          (normalizedData.invoices.length || 0) +
+          (normalizedData.payments.length || 0) +
+          (normalizedData.measurements.length || 0) +
+          (normalizedData.templates.length || 0);
 
-      // Total items count from backend
-      const totalRecords = Object.values(normalizedData)
-        .map((arr) => arr?.length || 0)
-        .reduce((a, b) => a + b, 0);
+        console.log(
+          "Business Data Records (excluding users):",
+          businessDataCount
+        );
 
-      console.log("Backend total records:", totalRecords);
+        // 🔴 CHECK: Agar business data 0 se zyada hai tabhi load karein
+        if (businessDataCount > 0) {
+          await clearAndBulkAdd(normalizedData);
+          dataLoadedFromServer = true;
 
-      // Backend has valid data
-      if (totalRecords > 0) {
-        await clearAndBulkAdd(normalizedData);
-        dataLoadedFromServer = true;
+          toast({
+            title: "Success",
+            description: "Data loaded from cloud into the app.",
+          });
+        } else {
+          console.warn(
+            "Backend returned ZERO business records. Skipping DB clear."
+          );
+
+          // Optional: Agar aap chahtay hain ke agar data khali ho to user ko bata den
+          toast({
+            title: "No Data Found",
+            description: "Cloud contains only user info but no business data.",
+            variant: "warning",
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Load from server error:", error);
+
+      toast({
+        title: "Server Error",
+        description: "Could not fetch data from cloud. Loading sample data.",
+        variant: "destructive",
+      });
+    }
+
+    // Fallback: Only load sample data if backend data was NOT loaded
+    if (!dataLoadedFromServer) {
+      try {
+        await loadSampleData(user?._id);
 
         toast({
-          title: "Success",
-          description: "Data loaded from cloud into the app.",
+          title: "Sample Data Loaded",
+          description: "Offline sample data is now available.",
         });
-      } else {
-        console.warn("Backend returned ZERO records. Skipping DB clear.");
+      } catch (fallbackError) {
+        console.error("Fallback load error:", fallbackError);
+        toast({
+          title: "Critical Error",
+          description: "Failed to load any data.",
+          variant: "destructive",
+        });
       }
     }
-  } catch (error) {
-    console.error("Load from server error:", error);
 
-    toast({
-      title: "Server Error",
-      description: "Could not fetch data from cloud. Loading sample data.",
-      variant: "destructive",
-    });
-  }
-
-  // Fallback: Only load sample data if backend 0 data was received
-  if (!dataLoadedFromServer) {
-    try {
-      await loadSampleData(user?._id);
-
-      toast({
-        title: "Sample Data Loaded",
-        description: "Offline sample data is now available.",
-      });
-    } catch (fallbackError) {
-      console.error("Fallback load error:", fallbackError);
-      toast({
-        title: "Critical Error",
-        description: "Failed to load any data.",
-        variant: "destructive",
-      });
-    }
-  }
-
-  setLoadingLoad(false);
-};
-
-
-  // --- Profile Update ---
-  const handleProfileUpdate = async (e) => {
-    e.preventDefault();
-    setLoadingProfile(true);
-    try {
-      await axios.put(`${API_URL}/user/updateProfile`, profileForm, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toast({ title: "Success", description: "Profile updated successfully." });
-    } catch (error) {
-      console.error("Profile update error:", error);
-      toast({
-        title: "Error",
-        description: error.response?.data?.error || "Failed to update profile.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingProfile(false);
-    }
+    setLoadingLoad(false);
   };
 
-  // --- Change Password ---
-  const handlePasswordChange = async (e) => {
-    e.preventDefault();
-    if (passwordForm.newPassword.length < 6) {
-      toast({
-        title: "Error",
-        description: "Password must be at least 6 characters.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setLoadingPassword(true);
-    try {
-      await axios.put(`${API_URL}/user/changePassword`, passwordForm, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toast({
-        title: "Success",
-        description: "Password changed successfully.",
-      });
-      setPasswordForm({ oldPassword: "", newPassword: "" });
-    } catch (error) {
-      console.error("Password change error:", error);
-      toast({
-        title: "Error",
-        description:
-          error.response?.data?.error || "Failed to change password.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoadingPassword(false);
-    }
-  };
+  // // --- Profile Update ---
+  // const handleProfileUpdate = async (e) => {
+  //   e.preventDefault();
+  //   setLoadingProfile(true);
+  //   try {
+  //     await axios.put(`${API_URL}/user/updateProfile`, profileForm, {
+  //       headers: { Authorization: `Bearer ${token}` },
+  //     });
+  //     toast({ title: "Success", description: "Profile updated successfully." });
+  //   } catch (error) {
+  //     console.error("Profile update error:", error);
+  //     toast({
+  //       title: "Error",
+  //       description: error.response?.data?.error || "Failed to update profile.",
+  //       variant: "destructive",
+  //     });
+  //   } finally {
+  //     setLoadingProfile(false);
+  //   }
+  // };
+
+  // // --- Change Password ---
+  // const handlePasswordChange = async (e) => {
+  //   e.preventDefault();
+  //   if (passwordForm.newPassword.length < 6) {
+  //     toast({
+  //       title: "Error",
+  //       description: "Password must be at least 6 characters.",
+  //       variant: "destructive",
+  //     });
+  //     return;
+  //   }
+  //   setLoadingPassword(true);
+  //   try {
+  //     await axios.put(`${API_URL}/user/changePassword`, passwordForm, {
+  //       headers: { Authorization: `Bearer ${token}` },
+  //     });
+  //     toast({
+  //       title: "Success",
+  //       description: "Password changed successfully.",
+  //     });
+  //     setPasswordForm({ oldPassword: "", newPassword: "" });
+  //   } catch (error) {
+  //     console.error("Password change error:", error);
+  //     toast({
+  //       title: "Error",
+  //       description:
+  //         error.response?.data?.error || "Failed to change password.",
+  //       variant: "destructive",
+  //     });
+  //   } finally {
+  //     setLoadingPassword(false);
+  //   }
+  // };
 
   return (
     <div>

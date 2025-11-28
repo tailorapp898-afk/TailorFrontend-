@@ -162,82 +162,68 @@ export const loadSampleData = async (userId) => {
   }
 };
 
-
-
-
+/**
+ * Attempt to synchronize all locally unsynced records to a backend.
+ * This function is intentionally generic: it collects unsynced records from all
+ * known stores and, if a syncFn is provided and the client is online, calls it
+ * with the unsynced payload. The syncFn should perform network requests and
+ * return an object indicating which records were successfully synced.
+ *
+ * If syncFn is not provided or client is offline, this returns the collected
+ * unsynced records so the caller can decide what to do.
+ *
+ * Example syncFn signature:
+ *   async function syncFn(unsynced) { return { success: true, syncedIds: { orders: ['local-123'] } } }
+ */
 export const syncAllToBackend = async (syncFn) => {
-  console.log("🚀 Sync Process Started..."); // 1. Yahan code shuru hua
-
   const db = await dbPromise;
   const storeNames = ['customers','families','orders','payments','invoices','measurements','templates'];
   
+  // Variable ka naam 'payload' kar diya kyunki ab isme SARA data hoga, sirf unsynced nahi
   const payload = {}; 
-  let totalItems = 0;
 
-  // 1️⃣ Collect ALL records
+  // 1️⃣ Collect ALL records (Not just unsynced)
   for (const storeName of storeNames) {
     try {
       const all = await db.getAll(storeName);
-      payload[storeName] = all || [];
-      totalItems += (all || []).length;
-      console.log(`📦 ${storeName}: ${all.length} items found`); // 2. Check karo data mil raha hai ya nahi
+      // 👇 CHANGE: Filter hata diya, ab sara data jayega
+      payload[storeName] = all || []; 
     } catch (err) {
-      console.error(`❌ Error fetching ${storeName}:`, err);
       payload[storeName] = [];
     }
   }
 
-  console.log("📊 Total items to send:", totalItems);
-  console.log("📡 Payload ready:", payload);
-
-  // 2️⃣ Check connectivity & Function presence
-  console.log("🌐 Internet Status:", navigator.onLine ? "Online" : "Offline");
-  console.log("🔧 Sync Function Provided?", syncFn ? "Yes" : "NO (Missing Function!)");
-
-  if (!syncFn || typeof syncFn !== 'function') {
-    console.error("🛑 STOP: Aapne sync function pass nahi kiya!");
-    return { success: false, reason: 'no-sync-fn', unsynced: payload };
+  // 2️⃣ Check connectivity
+  if (!syncFn || typeof syncFn !== 'function' || !navigator.onLine) {
+    return { success: false, reason: !navigator.onLine ? 'offline' : 'no-sync-fn', unsynced: payload };
   }
 
-  if (!navigator.onLine) {
-    console.warn("🛑 STOP: Internet nahi chal raha (Offline)");
-    return { success: false, reason: 'offline', unsynced: payload };
-  }
+  // 3️⃣ Call sync function with ALL data
+  const result = await syncFn(payload);
 
-  // 3️⃣ Call sync function
-  console.log("🚀 Sending data to Server now...");
-  
-  try {
-    const result = await syncFn(payload);
-    console.log("✅ Server Response:", result);
-
-    if (result && (result.success || result.message)) { // Check success carefully
-      console.log("💾 Marking items as Synced in Local DB...");
+  if (result && result.success) {
+    // ✅ Mark ALL records as synced locally
+    for (const storeName of storeNames) {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      const records = payload[storeName];
       
-      for (const storeName of storeNames) {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const records = payload[storeName];
-        
-        for (const rec of records) {
-          if (rec.synced === true) continue; 
-          try {
-            store.put({ ...rec, synced: true, updatedAt: new Date() });
-          } catch (err) {
-            console.error('Failed marking synced:', err);
-          }
+      for (const rec of records) {
+        // Agar pehle se synced marked hai to bar bar write karne ki zaroorat nahi (performance bachane ke liye)
+        if (rec.synced === true) continue; 
+
+        try {
+          // Sirf unko update karo jo synced nahi thay
+          store.put({ ...rec, synced: true, updatedAt: new Date() });
+        } catch (err) {
+          console.error('Failed marking synced for', storeName, rec._id || rec.localId, err);
         }
-        await tx.done;
       }
-      console.log("🎉 Sync Complete!");
-      return { success: true, result };
-    } else {
-      console.error("❌ Server returned failure:", result);
-      return { success: false, reason: 'sync-failed', result };
+      await tx.done;
     }
 
-  } catch (error) {
-    console.error("🔥 API Call Failed (Network Error):", error);
-    return { success: false, reason: 'network-error', error };
+    return { success: true, result };
   }
+
+  return { success: false, reason: 'sync-failed', result };
 };

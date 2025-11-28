@@ -52,10 +52,6 @@ export default function Navbar() {
           <Link to="/measurements" className="hover:text-blue-400 transition">
             Measurements
           </Link>
-          
-          <Link to="/invoices" className="hover:text-blue-400 transition">
-            Invoices
-          </Link>
           <Link to="/analytics" className="hover:text-blue-400 transition">
             Analytics
           </Link>
